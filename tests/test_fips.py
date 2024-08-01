@@ -23,6 +23,8 @@ from bci_tester.data import LTSS_BASE_FIPS_CONTAINERS
 from bci_tester.data import OS_VERSION
 from bci_tester.fips import FIPS_DIGESTS
 from bci_tester.fips import NONFIPS_DIGESTS
+from bci_tester.fips import FIPS_DIGESTS_GNUTLS
+from bci_tester.fips import NONFIPS_DIGESTS_GNUTLS
 from bci_tester.fips import host_fips_enabled
 
 #: multistage :file:`Dockerfile` that builds the program from
@@ -47,6 +49,24 @@ COPY --from=builder /usr/lib64/.libcrypto.so.1.1.hmac /usr/lib64/
 COPY --from=builder /usr/lib64/.libssl.so.1.1.hmac /usr/lib64/
 
 RUN /bin/fips-test sha256
+"""
+
+DOCKERFILE_GNUTLS = f"""FROM $builder as builder
+
+WORKDIR /src/
+COPY fips-test-gnutls.c /src/
+RUN zypper -n ref && zypper -n in gcc gnutls-devel && zypper -n clean
+RUN gcc -Og -g3 fips-test-gnutls.c -Wall -Wextra -Wpedantic -lgnutls -o fips-test-gnutls
+
+FROM $runner
+
+COPY --from=builder /src/fips-test-gnutls /bin/fips-test-gnutls
+COPY --from=builder /usr/lib64/libgnutls.so.30 /usr/lib64/
+COPY --from=builder /usr/lib64/libgmp.so.10 /usr/lib64/
+COPY --from=builder /usr/lib64/libnettle.so.6 /usr/lib64/
+COPY --from=builder /usr/lib64/libhogweed.so.4.5 /usr/lib64/
+
+RUN /bin/fips-test-gnutls sha256
 """
 
 _non_fips_host_skip_mark = [
@@ -164,3 +184,57 @@ def fips_mode_setup_check(container_per_test: ContainerData) -> None:
 )
 def test_openssl_fips_hashes(container_per_test: ContainerData):
     openssl_fips_hashes_test_fnct(container_per_test)
+
+@pytest.mark.parametrize("runner", CONTAINER_IMAGES)
+def test_gnutls_binary(
+    runner: ParameterSet,
+    tmp_path,
+    pytestconfig: Config,
+    host,
+    container_runtime: OciRuntimeBase,
+):
+    """Check that a binary linked against GNUTLS obeys the host's FIPS mode
+    setting:
+
+    - build a container image using :py:const:`DOCKERFILE_GNUTLS`
+    - run the bundled binary compiled from :file:`tests/files/fips-test-gnutls.c` with
+      all FIPS digests and assert that it successfully calculates the message
+      digest
+    - rerun the same binary with non-FIPS digests and assert that this fails
+      with the expected error message.
+
+    """
+    multi_stage_build = MultiStageBuild(
+        containers={"builder": BASE_CONTAINER, "runner": runner},
+        containerfile_template=DOCKERFILE_GNUTLS,
+    )
+
+    shutil.copy(
+        os.path.join(
+            os.path.abspath(os.path.dirname(__file__)), "files", "fips-test-gnutls.c"
+        ),
+        tmp_path / "fips-test-gnutls.c",
+    )
+
+    img_id = multi_stage_build.build(
+        tmp_path,
+        pytestconfig,
+        container_runtime,
+        extra_build_args=get_extra_build_args(pytestconfig),
+    )
+
+    exec_cmd = " ".join(
+        [container_runtime.runner_binary, "run", "--rm"]
+        + get_extra_run_args(pytestconfig)
+        + [img_id]
+    )
+
+    for digest in FIPS_DIGESTS_GNUTLS:
+        host.run_expect([0], f"{exec_cmd} /bin/fips-test-gnutls {digest}")
+
+    for digest in NONFIPS_DIGESTS_GNUTLS:
+        err_msg = host.run_expect(
+            [1], f"{exec_cmd} /bin/fips-test-gnutls {digest}"
+        ).stderr
+
+        assert f"Unknown message digest {digest}" in err_msg

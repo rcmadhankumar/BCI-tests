@@ -28,11 +28,28 @@ FIPS_DIGESTS = (
     "shake256",
 )
 
+
 #: all digests supported by openssl
 ALL_DIGESTS = NONFIPS_DIGESTS + FIPS_DIGESTS
 
 assert len(set(ALL_DIGESTS)) == len(ALL_DIGESTS)
 
+#: gnutls digests that are not FIPS compliant
+NONFIPS_DIGESTS_GNUTLS = ("md5", "gostr341194", "streebog-256", "streebog-512")
+
+#: gnutls digests that are FIPS compliant 
+FIPS_DIGESTS_GNUTLS = (
+    "sha1",
+    "sha224",
+    "sha256",
+    "sha384",
+    "sha512",
+)
+
+#: all digests supported by gnutls
+ALL_DIGESTS_GNUTLS = NONFIPS_DIGESTS_GNUTLS + FIPS_DIGESTS_GNUTLS
+
+assert len(set(ALL_DIGESTS_GNUTLS)) == len(ALL_DIGESTS_GNUTLS)
 
 def host_fips_supported(
     fipsfile: str = "/proc/sys/crypto/fips_enabled",
