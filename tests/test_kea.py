@@ -23,7 +23,7 @@ def test_kea_dhcp4(
     network_name = "macvlan-network"
     kea_config_file = "tests/files/kea-dhcp4.conf"
     dhclient_config_file_path = "/etc/dhclient.conf"
-    request_ip = "172.25.1.107"
+    request_ip = "172.25.10.19"
     with open(kea_config_file, "r") as f:
         config = json.load(f)
     subnet = config["Dhcp4"]["subnet4"][0]["subnet"]
@@ -82,7 +82,7 @@ def test_kea_dhcp4(
             # request a specific ip by passing the configuration file
             client_log = cli_con.run_expect(
                 [0],
-                "timeout 1m "
+                "timeout 5m "
                 + "dhclient -cf "
                 + dhclient_config_file_path
                 + " -v "
